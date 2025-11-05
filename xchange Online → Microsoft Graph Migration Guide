@@ -1,0 +1,68 @@
+# 🧭 Exchange Online → Microsoft Graph Migration Guide
+
+**Author:** *[Your Name]*
+**Last Updated:** 2025-11-05
+
+This document maps **Exchange Online PowerShell** commands to **Microsoft Graph** equivalents (covering ~80–90% of administrative scenarios) and provides **explicit alternate commands** where Graph does not yet support the functionality.
+
+---
+
+## 📘 PowerShell → Graph Mapping (+ Alternate Commands)
+
+| Category                  | Task                     | PowerShell Cmdlet                                                                                      | Graph Endpoint / SDK                                        | Graph Permissions                        | Alternate Command (if not supported)                                               |
+| ------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------- |
+| **Mailbox**               | Get all mailboxes        | `Get-Mailbox`                                                                                          | `GET /users` / `Get-MgUser`                                 | `User.Read.All`                          | ✅ Fully supported                                                                  |
+|                           | Get mailbox stats        | `Get-MailboxStatistics`                                                                                | —                                                           | —                                        | `Get-MailboxStatistics -Identity <Mailbox>`                                        |
+|                           | Set timezone             | `Set-MailboxRegionalConfiguration`                                                                     | `PATCH /users/{id}/mailboxSettings`                         | `MailboxSettings.ReadWrite`              | ✅                                                                                  |
+|                           | Configure forwarding     | `Set-Mailbox -Identity <User> -ForwardingSmtpAddress <Target>`                                         | `PATCH /users/{id}/mailboxSettings → forwardingSmtpAddress` | `MailboxSettings.ReadWrite`              | ✅                                                                                  |
+|                           | Enable auto-reply        | `Set-MailboxAutoReplyConfiguration`                                                                    | `PATCH /users/{id}/mailboxSettings/automaticRepliesSetting` | `MailboxSettings.ReadWrite`              | ✅                                                                                  |
+|                           | Add alias                | `Set-Mailbox -Identity <User> -EmailAddresses @("SMTP:user@domain.com","smtp:alias@domain.com")`       | `PATCH /users/{id}` → `proxyAddresses`                      | `User.ReadWrite.All`                     | Same PowerShell cmdlet above                                                       |
+| **Directory / Users**     | List users               | `Get-MsolUser`                                                                                         | `GET /users` / `Get-MgUser`                                 | `User.Read.All`                          | ✅                                                                                  |
+|                           | Password never expires   | `Set-MsolUser -UserPrincipalName <User> -PasswordNeverExpires $true`                                   | `PATCH /users/{id}` → `passwordPolicies`                    | `User.ReadWrite.All`                     | Same PowerShell cmdlet above                                                       |
+|                           | Reset password           | `Set-MsolUserPassword -UserPrincipalName <User> -NewPassword <Pass> -ForceChangePassword $false`       | `POST /users/{id}/changePassword`                           | `UserAuthenticationMethod.ReadWrite.All` | Same PowerShell cmdlet above                                                       |
+|                           | Add external contact     | `New-MailContact -Name <Name> -DisplayName <Name> -ExternalEmailAddress <Addr>`                        | `POST /contacts`                                            | `Contacts.ReadWrite`                     | Same PowerShell cmdlet above                                                       |
+|                           | Change UPN               | `Set-MsolUserPrincipalName -UserPrincipalName <Old> -NewUserPrincipalName <New>`                       | `PATCH /users/{id}` → `userPrincipalName`                   | `User.ReadWrite.All`                     | Same PowerShell cmdlet above                                                       |
+| **Messaging**             | Read mail                | `Get-MailMessage`                                                                                      | `GET /users/{id}/messages`                                  | `Mail.Read`                              | ✅                                                                                  |
+|                           | Send mail                | `Send-MailMessage -To <Addr> -Subject <Text> -Body <Text>`                                             | `POST /users/{id}/sendMail`                                 | `Mail.Send`                              | Same PowerShell cmdlet above                                                       |
+|                           | Move or copy message     | `Move-Item` / `Copy-Item`                                                                              | `POST /users/{id}/messages/{id}/move`                       | `Mail.ReadWrite`                         | ✅                                                                                  |
+| **Permissions**           | Grant Send As            | `Add-RecipientPermission -Identity <Mailbox> -Trustee <User> -AccessRights SendAs`                     | ❌                                                           | —                                        | `Add-RecipientPermission -Identity <Mailbox> -Trustee <User> -AccessRights SendAs` |
+|                           | Grant Send on Behalf     | `Set-Mailbox -Identity <Mailbox> -GrantSendOnBehalfTo <User>`                                          | ⚠ `/users/{id}/delegates` (beta)                            | `Mail.Send.Shared`                       | `Set-Mailbox -Identity <Mailbox> -GrantSendOnBehalfTo <User>`                      |
+|                           | Grant Full Access        | `Add-MailboxPermission -Identity <Mailbox> -User <User> -AccessRights FullAccess -InheritanceType All` | ❌                                                           | —                                        | Same PowerShell cmdlet above                                                       |
+|                           | Grant Receive As         | `Add-MailboxPermission -Identity <Mailbox> -User <User> -AccessRights ReceiveAs`                       | ❌                                                           | —                                        | Same PowerShell cmdlet above                                                       |
+| **Discovery & Archive**   | Create Discovery Mailbox | `New-Mailbox -Name "DiscoverySearchMailbox" -Discovery`                                                | ❌                                                           | —                                        | Same PowerShell cmdlet above                                                       |
+|                           | Enable Archive           | `Enable-Mailbox -Identity <User> -Archive`                                                             | ⚠ Partial preview                                           | —                                        | Same PowerShell cmdlet above                                                       |
+|                           | Rename Archive           | `Set-Mailbox -Identity <User> -ArchiveName "Personal Archive - <User>"`                                | ❌                                                           | —                                        | Same PowerShell cmdlet above                                                       |
+| **Folders & Permissions** | Grant folder permissions | `Add-MailboxFolderPermission -Identity <User>:\Inbox -User <Delegate> -AccessRights Reviewer`          | ❌                                                           | —                                        | Same PowerShell cmdlet above                                                       |
+
+---
+
+## 🛡️ Security & Governance
+
+```powershell
+New-ApplicationAccessPolicy -AppId <AppID> -PolicyScopeGroupId "HelpdeskAccessGroup" -AccessRight RestrictAccess
+```
+
+* Use Managed Identity or Azure Key Vault for credentials.
+* Audit Graph and PowerShell activity via Unified Audit Log.
+
+---
+
+## 🔄 Maintenance & Review Schedule
+
+| Feature            | Graph Support | Alternate Command                                                                  | Review Frequency |
+| ------------------ | ------------- | ---------------------------------------------------------------------------------- | ---------------- |
+| Send As            | ❌             | `Add-RecipientPermission -Identity <Mailbox> -Trustee <User> -AccessRights SendAs` | 6 months         |
+| Receive As         | ❌             | `Add-MailboxPermission -Identity <Mailbox> -User <User> -AccessRights ReceiveAs`   | 6 months         |
+| Full Access        | ❌             | `Add-MailboxPermission -Identity <Mailbox> -User <User> -AccessRights FullAccess`  | 6 months         |
+| Discovery Mailbox  | ❌             | `New-Mailbox -Name "DiscoverySearchMailbox" -Discovery`                            | 6 months         |
+| Archive Mailbox    | ⚠ Partial     | `Enable-Mailbox -Identity <User> -Archive`                                         | 3 months         |
+| Folder Permissions | ❌             | `Add-MailboxFolderPermission -Identity <User>:\Inbox -User <Delegate>`             | 6 months         |
+
+---
+
+## ✅ Next Steps
+
+1. Commit this file as `README.md` in GitHub.
+2. Populate a CSV or Markdown table using this mapping for easy reference.
+3. Test Graph and fallback PowerShell commands in a sandbox tenant.
+4. Review quarterly to replace legacy commands as Graph coverage expands.
